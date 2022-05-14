@@ -28,12 +28,11 @@ class D4PGAgent:
         self.max_memory_size = max_memory_size
         self.batch_size = batch_size
 
-        self.LEARN_EVERY_N_STEP = 200
+        self.LEARN_EVERY_N_STEP = 50
         self.t_step = 0  # counter for activating learning step
 
         self.gamma   = gamma    # discount factor
         self.tau     = tau
-        self.t_step  = 50        # counter for activating learning
         self.n_steps = n_steps
         self.hidden_size_critic = [512, 512, 256]
         self.hidden_size_actor  = [256, 256, 256]
@@ -200,9 +199,8 @@ class D4PGAgent:
 
 
 def main():
-    EPISODES   = 200000  # ---> T, total number of episodes
-    batch_size = 128
-    gamma      = 0.98
+    EPISODES   = 100000  # ---> T, total number of episodes
+    batch_size = 64
 
     env = gym.make('Pendulum-v1')
     agent = D4PGAgent(env, batch_size=batch_size)
@@ -226,8 +224,10 @@ def main():
         print(f"******* -----Episode {episode + 1} Ended-----********* ")
         print("Episode total reward:", episode_reward)
         rewards.append(episode_reward)
+        avg_rewards.append(np.mean(rewards[-10:]))
 
     plt.plot(rewards)
+    plt.plot(avg_rewards)
     plt.plot()
     plt.xlabel('Episode')
     plt.ylabel('Reward')
