@@ -1,3 +1,5 @@
+import time
+
 import gym
 import torch
 import torch.nn as nn
@@ -21,9 +23,7 @@ class DDPGagent:
         self.max_memory_size = max_memory_size
         self.batch_size = batch_size
 
-        self.LEARN_EVERY_N_STEP = 200  # 200 means wait until the end of the "game"
-        self.update_interaction = 20
-        self.t_step = 0  # counter for activating learning step
+        self.update_interaction = 10  # number of updates of NN per Episode
 
         self.gamma = gamma  # discount factor
         self.tau = 0.005
@@ -79,20 +79,15 @@ class DDPGagent:
         self.actor.train()
         return action[0]
 
-    def step_training(self, state, action, reward, next_state, done):
+
+    def add_experience_memory(self, state, action, reward, next_state, done):
         # Save experience in memory
         self.memory.replay_buffer_add(state, action, reward, next_state, done)
 
-        # learn step i.e. how often to learn
-        self.t_step = self.t_step + 1
-        if self.t_step % self.LEARN_EVERY_N_STEP == 0:
-            self.learn_step()
-
-    def learn_step(self):
+    def step_training(self):
         # check, if enough samples are available in memory
         if self.memory.__len__() <= self.batch_size:
             return
-
         # update the networks every N times
         for it in range(self.update_interaction):
             states, actions, rewards, next_states, dones = self.memory.sample_experience(self.batch_size)
@@ -147,19 +142,20 @@ class DDPGagent:
                 target_param.data.copy_(param.data * self.tau + target_param.data * (1.0 - self.tau))
 
     def save_model(self):
-        torch.save(self.actor.state_dict(), 'ddpg_actor.pth')
-        torch.save(self.critic.state_dict(), 'ddpg_critic.pth')
+        torch.save(self.actor.state_dict(), 'weights/ddpg_actor_1K.pth')
+        torch.save(self.critic.state_dict(), 'weights/ddpg_critic_1K.pth')
+        print("models has been saved...")
 
     def load_model(self):
-        self.actor.load_state_dict(torch.load('ddpg_actor.pth'))
-        self.critic.load_state_dict(torch.load('ddpg_critic.pth'))
+        self.actor.load_state_dict(torch.load('weights/ddpg_actor_1K.pth'))
+        self.critic.load_state_dict(torch.load('weights/ddpg_critic_1K.pth'))
         print("models has been loaded...")
 
 
 
 def main():
-    EPISODES        = 5000  # Total number of episodes
-    render_interval = EPISODES * 0.95  # Activate render after 90% of total episodes
+    EPISODES        = 10  # Total number of episodes
+    render_interval = EPISODES * 0.95  # Activate render after 95% of total episodes
     batch_size      = 64
 
     env = gym.make('Pendulum-v1')
@@ -176,14 +172,15 @@ def main():
         episode_reward = 0
         step = 0
         while not done:
+            if episode >= render_interval:env.render()
             action = agent.get_action(state)
             action = noise.get_action(action, step)
             new_state, reward, done, _ = env.step(action)
-            # if episode >= render_interval:env.render()
-            agent.step_training(state, action, reward, new_state, done)
+            agent.add_experience_memory(state, action, reward, new_state, done)
             state = new_state
             if done:
-                break
+                agent.step_training()  # Update the NNs
+                #break
             step += 1
             episode_reward += reward
         print(f"******* -----Episode {episode} Ended-----********* ")
@@ -202,8 +199,8 @@ def main():
     #plt.show()
 
 
-def test():
-    TEST_EPISODES = 10
+def test_load():
+    TEST_EPISODES = 1000
     env = gym.make('Pendulum-v1')
     agent = DDPGagent(env)
     agent.load_model()
@@ -218,6 +215,7 @@ def test():
             new_state, reward, done, _ = env.step(action)
             episode_reward += reward
             state = new_state
+            time.sleep(0.03)
             if done:
                 break
         print("Episode total reward:", episode_reward)
@@ -225,4 +223,4 @@ def test():
 
 if __name__ == '__main__':
     #main()
-    test()
+    test_load()
