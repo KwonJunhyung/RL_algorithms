@@ -17,16 +17,16 @@ import matplotlib.pyplot as plt
 class DDPGagent:
 
     def __init__(self, env, actor_learning_rate=1e-4, critic_learning_rate=1e-3, gamma=0.99,
-                 max_memory_size=50000, tau=1e-2, batch_size=64):
+                 max_memory_size=50000, tau=0.005, batch_size=64):
 
         # -------- Hyper-parameters --------------- #
         self.max_memory_size = max_memory_size
         self.batch_size = batch_size
 
-        self.update_interaction = 10  # number of updates of NN per Episode
+        self.update_interaction = 1  # number of updates of NN per Episode
 
         self.gamma = gamma  # discount factor
-        self.tau = 0.005
+        self.tau = tau
         self.hidden_size_critic = [512, 512, 256]
         self.hidden_size_actor  = [256, 256, 256]
 
@@ -154,7 +154,7 @@ class DDPGagent:
 
 
 def main():
-    EPISODES        = 10  # Total number of episodes
+    EPISODES        = 10000  # Total number of episodes
     render_interval = EPISODES * 0.95  # Activate render after 95% of total episodes
     batch_size      = 64
 
@@ -172,7 +172,7 @@ def main():
         episode_reward = 0
         step = 0
         while not done:
-            if episode >= render_interval:env.render()
+            #if episode >= render_interval:env.render()
             action = agent.get_action(state)
             action = noise.get_action(action, step)
             new_state, reward, done, _ = env.step(action)
@@ -200,7 +200,7 @@ def main():
 
 
 def test_load():
-    TEST_EPISODES = 1000
+    TEST_EPISODES = 10
     env = gym.make('Pendulum-v1')
     agent = DDPGagent(env)
     agent.load_model()
@@ -222,5 +222,5 @@ def test_load():
 
 
 if __name__ == '__main__':
-    #main()
-    test_load()
+    main()
+    #test_load()
