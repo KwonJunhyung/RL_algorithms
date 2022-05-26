@@ -69,8 +69,8 @@ class DDPGagent:
         return action[0]
         '''
 
-
         state_tensor = torch.from_numpy(state).float().unsqueeze(0)  # numpy to a tensor with shape [1,3]
+
         self.actor.eval()
         with torch.no_grad():
             action = self.actor.forward(state_tensor)
@@ -92,11 +92,13 @@ class DDPGagent:
         for it in range(self.update_interaction):
             states, actions, rewards, next_states, dones = self.memory.sample_experience(self.batch_size)
 
-            states = np.array(states)
+      
+            states  = np.array(states)
             actions = np.array(actions)
             rewards = np.array(rewards).reshape(-1, 1)
             dones = np.array(dones).reshape(-1, 1)
             next_states = np.array(next_states)
+
 
             states = torch.FloatTensor(states)
             actions = torch.FloatTensor(actions)
@@ -141,9 +143,10 @@ class DDPGagent:
             for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
                 target_param.data.copy_(param.data * self.tau + target_param.data * (1.0 - self.tau))
 
+    
     def save_model(self):
-        torch.save(self.actor.state_dict(), 'weights/ddpg_actor_1K.pth')
-        torch.save(self.critic.state_dict(), 'weights/ddpg_critic_1K.pth')
+        torch.save(self.actor.state_dict(), 'weights/ddpg_actor_gaussian_noise.pth')
+        torch.save(self.critic.state_dict(), 'weights/ddpg_critic_gaussian_noise.pth')
         print("models has been saved...")
 
     def load_model(self):
@@ -154,27 +157,37 @@ class DDPGagent:
 
 
 def main():
-    EPISODES        = 10000  # Total number of episodes
+
+    EPISODES        = 10000            # Total number of episodes
     render_interval = EPISODES * 0.95  # Activate render after 95% of total episodes
     batch_size      = 64
 
-    env = gym.make('Pendulum-v1')
+    env   = gym.make('Pendulum-v1')
     agent = DDPGagent(env, batch_size=batch_size)
     noise = OUNoise(env.action_space)
 
-    rewards = []
+    rewards     = []
     avg_rewards = []
 
     for episode in range(1, EPISODES + 1):
+
         state = env.reset()
-        done = False
+        done  = False
         noise.reset()
         episode_reward = 0
         step = 0
+
         while not done:
-            #if episode >= render_interval:env.render()
+            #env.render()
+            if episode >= render_interval:env.render()
+            
             action = agent.get_action(state)
-            action = noise.get_action(action, step)
+            
+            # add noise to the accion
+            #action = noise.get_action(action, step)
+            action = noise.get_action_gaussian(action)
+
+
             new_state, reward, done, _ = env.step(action)
             agent.add_experience_memory(state, action, reward, new_state, done)
             state = new_state
@@ -222,5 +235,5 @@ def test_load():
 
 
 if __name__ == '__main__':
-    main()
-    #test_load()
+    #main()
+    test_load()

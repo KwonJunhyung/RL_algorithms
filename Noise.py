@@ -22,7 +22,7 @@ class OUNoise(object):
         self.state = np.ones(self.action_dim) * self.mu
 
     def evolve_state(self):
-        x = self.state
+        x  = self.state
         dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(self.action_dim)
         self.state = x + dx
         return self.state
@@ -31,3 +31,16 @@ class OUNoise(object):
         ou_state = self.evolve_state()
         self.sigma = self.max_sigma - (self.max_sigma - self.min_sigma) * min(1.0, t / self.decay_period)
         return np.clip(action + ou_state, self.low, self.high)
+
+    def get_action_gaussian(self, action):
+        
+        # Gaussian Normal Distribution to add noise to the action output
+        gauss_noise = np.random.normal(0, scale=0.1, size=self.action_dim)
+        tran_action = action + gauss_noise
+        return np.clip(tran_action, self.low, self.high)
+
+      
+
+
+        
+        
