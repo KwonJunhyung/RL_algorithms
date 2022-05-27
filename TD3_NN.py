@@ -43,10 +43,10 @@ class Actor(nn.Module):
     def forward(self, x):
         for layer in self.encoder:
             x = layer(x)
-        # print(x.size())
         for layer in self.linear:
             x = layer(x)
-            # print(x.size())
+
+        return x
 
 
 class Critic(nn.Module):
