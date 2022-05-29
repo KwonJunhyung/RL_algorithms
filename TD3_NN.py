@@ -34,10 +34,10 @@ class Actor(nn.Module):
         ])
 
         self.linear = torch.nn.ModuleList([
-            torch.nn.Linear(latent_dim, 30),
-            torch.nn.ReLU(),
-            torch.nn.Linear(30, action_dim),
-            torch.nn.Tanh(),
+                torch.nn.Linear(latent_dim, 30),
+                torch.nn.ReLU(),
+                torch.nn.Linear(30, action_dim),
+                torch.nn.Tanh(),
         ])
 
     def forward(self, x):

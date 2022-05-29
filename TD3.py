@@ -135,7 +135,7 @@ class TD3agent(object):
 			critic_loss_2.backward()
 			self.critic_optimizer_2.step()
 
-			update_q_func_counter +=1
+			update_q_func_counter += 1
 
 			# TD3 updates the policy (and target networks) less frequently than the Q-function
 
