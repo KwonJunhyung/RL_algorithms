@@ -11,17 +11,11 @@ class TD3_Memory:
         self.replay_max_size = replay_max_size
         self.replay_buffer = deque(maxlen=self.replay_max_size)
 
-        self.stack_img = 4
-        self.state_buffer = deque(maxlen=self.stack_img)
-
 
     def replay_buffer_add(self, state, action, reward, next_state, done):
+        experience = (state, action, reward, next_state, done)
+        self.replay_buffer.append(experience)
 
-        self.state_buffer.append(state)
-
-        if len(self.state_buffer) == 4:
-            experience = (self.state_buffer, action, reward, next_state, done)
-            self.replay_buffer.append(experience)
 
     def sample_experience(self, batch_size):
         state_batch      = []
