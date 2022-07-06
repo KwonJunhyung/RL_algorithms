@@ -6,58 +6,77 @@
 """
 
 import gym
-import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
 import numpy as np
 from collections import deque
-from gym.envs.box2d.car_dynamics import Car
 from PIL import Image, ImageDraw, ImageOps
 
 from TD3_Car_Racing_Memory import TD3_Memory
 from TD3_Car_Racing_NN import Actor, Critic
 import matplotlib.pyplot as plt
 
+import time
+counter = 0
+
 
 class TD3_Racing(object):
+
     def __init__(self, env, batch_size):
 
-        self.critic_learning_rate = 1e-4
+        self.critic_learning_rate = 1e-3
         self.actor_learning_rate  = 1e-4
+        self.tau = 0.005
 
         self.gamma = 0.99
-        self.max_memory_size = 50_000
+        self.max_memory_size = 10_000
         self.batch_size = batch_size
         self.action_dim = env.action_space.shape[0]  # 3
 
-        self.update_interaction = 2
-        self.policy_freq = 2
-        self.tau = 0.005
+        self.update_interaction = 6
+        self.policy_freq_update = 2
+        self.update_counter     = 0
+
 
         # ------------- Initialization memory --------------------- #
         self.memory = TD3_Memory(self.max_memory_size)
 
         # ---------- Initialization and build the networks ----------- #
         # Main Networks
-        self.actor  = Actor(self.action_dim)
-        self.critic = Critic(self.action_dim)
+        self.actor     = Actor(self.action_dim)
+        self.critic_q1 = Critic(self.action_dim)
+        self.critic_q2 = Critic(self.action_dim)
 
         # Target networks
         self.actor_target  = Actor(self.action_dim)
-        self.critic_target = Critic(self.action_dim)
-
-        self.actor_optimizer  = optim.Adam(self.actor.parameters(), lr=self.actor_learning_rate)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_learning_rate)
-
+        self.critic_target_q1 = Critic(self.action_dim)
+        self.critic_target_q2 = Critic(self.action_dim)
 
         # Initialization of the target networks as copies of the original networks
         for target_param, param in zip(self.actor_target.parameters(), self.actor.parameters()):
             target_param.data.copy_(param.data)
 
-        for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
+        for target_param, param in zip(self.critic_target_q1.parameters(), self.critic_q1.parameters()):
             target_param.data.copy_(param.data)
+
+        for target_param, param in zip(self.critic_target_q2.parameters(), self.critic_q2.parameters()):
+            target_param.data.copy_(param.data)
+
+        self.actor_optimizer    = optim.Adam(self.actor.parameters(), lr=self.actor_learning_rate)
+        self.critic_optimizer_1 = optim.Adam(self.critic_q1.parameters(), lr=self.critic_learning_rate)
+        self.critic_optimizer_2 = optim.Adam(self.critic_q2.parameters(), lr=self.critic_learning_rate)
+
+    def get_action(self, state):
+        state_tensor = torch.from_numpy(state).float().unsqueeze(0)
+        self.actor.eval()
+        with torch.no_grad():
+            action = self.actor.forward(state_tensor)
+            action = action.detach()
+            action = action.numpy()  # tensor to numpy
+        self.actor.train()
+        return action[0]
 
 
     def add_experience_memory(self, state, action, reward, next_state, done):
@@ -68,6 +87,8 @@ class TD3_Racing(object):
         # check, if enough samples are available in memory
         if self.memory.__len__() <= self.batch_size:
             return
+
+        self.update_counter += 1
 
         for it in range(self.update_interaction):
 
@@ -100,49 +121,68 @@ class TD3_Racing(object):
             next_actions = np.clip(next_actions, -1, 1)
             next_actions = torch.FloatTensor(next_actions)
 
-            next_Q_vales_q1,  next_Q_vales_q2 = self.critic_target.forward(next_states, next_actions)
-            Q_min    = torch.min(next_Q_vales_q1, next_Q_vales_q2)
-            Q_target = rewards + (self.gamma * (1 - dones) * Q_min).detach()
+            # compute next targets values
+            next_Q_vales_q1 = self.critic_target_q1.forward(next_states, next_actions)
+            next_Q_vales_q2 = self.critic_target_q2.forward(next_states, next_actions)
 
-            Q_vals_q1, Q_vals_q2 = self.critic.forward(states, actions)
+            q_min = torch.minimum(next_Q_vales_q1, next_Q_vales_q2)
+
+            Q_target = rewards + (self.gamma * (1 - dones) * q_min).detach()
 
             loss = nn.MSELoss()
-            critic_loss = loss(Q_vals_q1, Q_target) + loss(Q_vals_q2, Q_target)
+
+            Q_vals_q1 = self.critic_q1.forward(states, actions)
+            Q_vals_q2 = self.critic_q2.forward(states, actions)
+
+            critic_loss_1 = loss(Q_vals_q1, Q_target)
+            critic_loss_2 = loss(Q_vals_q2, Q_target)
 
             # Critic step Update
-            self.critic_optimizer.zero_grad()
-            critic_loss.backward()
-            self.critic_optimizer.step()
+            self.critic_optimizer_1.zero_grad()
+            critic_loss_1.backward()
+            self.critic_optimizer_1.step()
 
-            # Delayed policy updates
-            if it % self.policy_freq == 0:
-                actor_loss = - self.critic.Q1(states, self.actor(states)).mean()
+            self.critic_optimizer_2.zero_grad()
+            critic_loss_2.backward()
+            self.critic_optimizer_2.step()
+
+            # TD3 updates the policy (and target networks) less frequently than the Q-function
+            if self.update_counter % self.policy_freq_update == 0:
+                # ------- calculate the actor loss
+                actor_loss = - self.critic_q1.forward(states, self.actor.forward(states)).mean()
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
                 self.actor_optimizer.step()
 
+                # ------------------------------------- Update target networks --------------- #
+                # update the target networks using tao "soft updates"
                 for target_param, param in zip(self.actor_target.parameters(), self.actor.parameters()):
                     target_param.data.copy_(param.data * self.tau + target_param.data * (1.0 - self.tau))
 
-                for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
+                for target_param, param in zip(self.critic_target_q1.parameters(), self.critic_q1.parameters()):
                     target_param.data.copy_(param.data * self.tau + target_param.data * (1.0 - self.tau))
 
+                for target_param, param in zip(self.critic_target_q2.parameters(), self.critic_q2.parameters()):
+                    target_param.data.copy_(param.data * self.tau + target_param.data * (1.0 - self.tau))
 
-    def get_action(self, state):
-        state_tensor = torch.from_numpy(state).float().unsqueeze(0)
-        self.actor.eval()
-        with torch.no_grad():
-            action = self.actor.forward(state_tensor)
-            action = action.detach()
-            action = action.numpy()  # tensor to numpy
-        self.actor.train()
-        return action[0]
+    def save_model(self):
+        torch.save(self.actor.state_dict(), 'weights/td3_car_racing_actor.pth')
+        torch.save(self.critic_q1.state_dict(), 'weights/td3_car_racing_critic_1.pth')
+        torch.save(self.critic_q2.state_dict(), 'weights/td3_critic_cube_critic_2.pth')
+        print("models has been saved...")
+
+    def load_model(self):
+        self.actor.load_state_dict(torch.load('weights/td3_car_racing_actor.pth'))
+        self.critic_q1.load_state_dict(torch.load('weights/td3_car_racing_critic_1.pth'))
+        self.critic_q2.load_state_dict(torch.load('weights/td3_critic_cube_critic_2.pth'))
+        print("models has been loaded...")
+
 
 
 def crop_normalize_observation(observation):
     image = Image.fromarray(observation[:83, :, :], mode='RGB')  # removing bottom of the image
     image = image.resize((64, 64), Image.BILINEAR)  # resizing to (64X64X3)
-    gray_image = ImageOps.grayscale(image)
+    gray_image = ImageOps.grayscale(image)  # 64x64
     img = np.asarray(gray_image)
     img = img.astype('float32')  # convert from integers to floats 32
     img = img / 255.0  # normalize the image [0~1]
@@ -159,12 +199,12 @@ def rgb2gray(rgb, norm=True):
 
 
 def main():
-    num_episodes     = 200
+    num_episodes     = 1000
     render_interval  = num_episodes * 0.99
     episode_horizont = 1000  # after this number env auto-reset
     batch_size       = 64
 
-    env   = gym.make('CarRacing-v0')
+    env   = gym.make('CarRacing-v1')
     agent = TD3_Racing(env, batch_size)
 
     rewards     = []
@@ -173,32 +213,27 @@ def main():
     for episode in range(1, num_episodes+1):
 
         initial_frame = env.reset()
-        #initial_frame = crop_normalize_observation(initial_frame)
-        initial_frame = rgb2gray(initial_frame)
+        initial_frame = crop_normalize_observation(initial_frame)
 
         state_frame_queue = deque([initial_frame] * 4, maxlen=4)
-
         episode_reward = 0
         done = False
 
         for step in range(episode_horizont):
+            #if episode >= render_interval:env.render()
 
-            if episode >= render_interval:env.render()
-            current_state = np.array(state_frame_queue)  # (4,64,64)  // (4, 96, 96)
+            current_state = np.array(state_frame_queue)  # (4,64,64)
 
             action = agent.get_action(current_state)
             action = action + (np.random.normal(0, scale=0.1, size=env.action_space.shape[0]))
             action = np.clip(action, -1, 1)
-
             next_frame, reward, done, _ = env.step(action)
-
-            #next_frame = crop_normalize_observation(next_frame)
-            next_frame = rgb2gray(next_frame)
-
+            next_frame = crop_normalize_observation(next_frame)
             state_frame_queue.append(next_frame)
             next_state = np.array(state_frame_queue)
 
-            agent.add_experience_memory(current_state, action, reward, next_state, done)
+            if step > 50:
+                agent.add_experience_memory(current_state, action, reward, next_state, done)
 
             episode_reward += reward
 
@@ -209,7 +244,7 @@ def main():
 
         print(f"Episode {episode} Ended, Episode total reward: {episode_reward}")
         rewards.append(episode_reward)
-        avg_rewards.append(np.mean(rewards[-50:]))
+        avg_rewards.append(np.mean(rewards[-100:]))
 
     plt.plot(rewards)
     plt.plot(avg_rewards)
@@ -217,6 +252,7 @@ def main():
     plt.xlabel('Episode')
     plt.ylabel('Reward')
     plt.show()
+
 
 if __name__ == '__main__':
     main()

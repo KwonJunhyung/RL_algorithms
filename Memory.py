@@ -10,7 +10,6 @@ class MemoryClass:
         self.replay_buffer = deque(maxlen=replay_max_size)  # buffer of experiences to sample during training
 
     def replay_buffer_add(self, state, action, reward, next_state, done):
-        #experience = (state, action, np.array([reward]), next_state, done)
         experience = (state, action, reward, next_state, done)
         self.replay_buffer.append(experience)
 
