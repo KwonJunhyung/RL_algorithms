@@ -100,15 +100,14 @@ def model_learn():
 								).to(device)
 
 	loss_fn   = torch.nn.MSELoss(reduction='mean')
-	optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate)
+	optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-	trainloader = DataLoader(TensorDataset(x,y), batch_size = 2000, shuffle=True)
+	trainloader = DataLoader(TensorDataset(x, y), batch_size=2000, shuffle=True)
 
 	tol 		 = 1e-3
 	running_loss = 100.0
 	
-	hold_loss=[]
-
+	hold_loss = []
 
 	for epoch in range(100):
 
@@ -117,7 +116,7 @@ def model_learn():
 	
 		batch_iter = 0
 
-		for x_batch,y_batch in trainloader:
+		for x_batch, y_batch in trainloader:
 		
 			batch_iter += 1
 
@@ -126,7 +125,7 @@ def model_learn():
 
 			running_loss = loss.item()
 
-			print('epoch ({},{}), loss {}'.format(epoch,batch_iter,loss.item()))
+			print('epoch ({},{}), loss {}'.format(epoch, batch_iter, loss.item()))
 
 			optimizer.zero_grad()
 
