@@ -55,7 +55,6 @@ class TD3agent(object):
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_learning_rate)
 
 
-
     def get_action(self, state):
         state_tensor = torch.from_numpy(state).float().unsqueeze(0)  # numpy to a tensor with shape [1,3]
         action = self.actor.forward(state_tensor)
@@ -96,6 +95,7 @@ class TD3agent(object):
             Q_vals_q1, Q_vals_q2 = self.critic.forward(states, actions)
 
             with torch.no_grad():
+
                 next_actions = self.actor_target.forward(next_states)
                 noise_action = (torch.randn_like(actions) * 0.05).clamp(-1, 1)
                 next_actions = (next_actions + noise_action).clamp(-1, 1)
