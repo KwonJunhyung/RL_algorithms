@@ -51,6 +51,39 @@ class Memory:
         return len(self.replay_buffer_model)
 
 
+class ModelNet_probabilistic_transition(nn.Module):
+
+    def __init__(self, input_size, hidden_size):
+        super(ModelNet_probabilistic_transition, self).__init__()
+
+        self.mean_layer = nn.Sequential(
+            nn.Linear(input_size, hidden_size[0]),
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.Linear(hidden_size[0], hidden_size[1]),
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.Linear(hidden_size[1], 1)
+        )
+
+        self.std_layer = nn.Sequential(
+            nn.Linear(input_size, hidden_size[0]),
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.Linear(hidden_size[0], hidden_size[1]),
+            nn.ReLU(),
+            nn.Dropout(),
+            nn.Linear(hidden_size[1], 1),
+            nn.Softplus()
+        )
+
+    def forward(self, state, action):
+        x   = torch.cat([state, action], dim=1)  # Concatenates the seq tensors in the given dimension
+        u   = self.mean_layer(x)
+        std = self.std_layer(x)
+        return torch.distributions.Normal(u, std)
+
+
 class ModelNet_transitions(nn.Module):
     # This neural network uses action and current state as inputs.
     def __init__(self, input_size, hidden_size, output_size):
@@ -107,18 +140,24 @@ class ModelAgent:
 
         self.env = env
         self.max_memory_size = 10_000
-        self.batch_size = 32
+        self.batch_size = 64
         self.actor_learning_rate = 1e-4
+        self.transition_learning_rate = 1e-2
+
 
         self.memory = Memory(self.max_memory_size)
 
-        self.hidden_size_network_model = [128, 64]
+        self.hidden_size_network_model = [200, 200]
         self.num_states  = 3
         self.num_actions = 1
 
         self.model_transition_1 = ModelNet_transitions(self.num_states + self.num_actions, self.hidden_size_network_model, self.num_states)
         self.model_transition_2 = ModelNet_transitions(self.num_states + self.num_actions, self.hidden_size_network_model, self.num_states)
         self.model_transition_3 = ModelNet_transitions(self.num_states + self.num_actions, self.hidden_size_network_model, self.num_states)
+
+        self.pdf_transition_1 = ModelNet_probabilistic_transition(self.num_states+self.num_actions, self.hidden_size_network_model)
+        self.pdf_transition_2 = ModelNet_probabilistic_transition(self.num_states+self.num_actions, self.hidden_size_network_model)
+        self.pdf_transition_3 = ModelNet_probabilistic_transition(self.num_states+self.num_actions, self.hidden_size_network_model)
 
         self.model_reward = ModelNet_reward(self.num_states + self.num_actions, self.hidden_size_network_model, 1)
         self.model_done   = ModelNet_N_done(self.num_states)
@@ -127,8 +166,9 @@ class ModelAgent:
         self.model_transition_2_optimizer = optim.Adam(self.model_transition_2.parameters(), lr=self.actor_learning_rate)
         self.model_transition_3_optimizer = optim.Adam(self.model_transition_3.parameters(), lr=self.actor_learning_rate)
 
-        self.model_reward_optimizer = optim.Adam(self.model_reward.parameters(), lr=self.actor_learning_rate)
+        self.pdf_transition_1_optimizer = optim.Adam(self.pdf_transition_1.parameters(), lr=self.transition_learning_rate, weight_decay=1e-5)
 
+        self.model_reward_optimizer = optim.Adam(self.model_reward.parameters(), lr=self.actor_learning_rate)
 
 
     def get_action_from_policy(self):
@@ -154,28 +194,47 @@ class ModelAgent:
             dones   = np.array(dones).reshape(-1, 1)
             next_states = np.array(next_states)
 
-
-
             states  = torch.FloatTensor(states)
             actions = torch.FloatTensor(actions)
             rewards = torch.FloatTensor(rewards)
             dones   = torch.FloatTensor(dones)
             next_states = torch.FloatTensor(next_states)
 
-            print(dones)
 
             # ---- Transition Model---- #
+            # number of ensembles = 3
+
             prediction_transition_1 = self.model_transition_1.forward(states, actions)
             prediction_transition_2 = self.model_transition_2.forward(states, actions)
             prediction_transition_3 = self.model_transition_3.forward(states, actions)
+
+            distribution_probability_model_1 = self.pdf_transition_1.forward(states, actions)
+            distribution_probability_model_2 = self.pdf_transition_1.forward(states, actions)
+            distribution_probability_model_3 = self.pdf_transition_1.forward(states, actions)
+
+            # calculate the loss
+            loss_neg_log_likelihood_1 = - distribution_probability_model_1.log_prob(next_states)
+
+            loss_neg_log_likelihood_1 = torch.mean(loss_neg_log_likelihood_1)
+            #loss_neg_log_likelihood_1 = torch.sum(loss_neg_log_likelihood_1)
+
+            print(loss_neg_log_likelihood_1)
+
+            self.pdf_transition_1_optimizer.zero_grad()
+            loss_neg_log_likelihood_1.backward()
+            self.pdf_transition_1_optimizer.step()
+
+
+            #loss_avg = torch.mean(neg_log_likelihood_1)
+            #print(loss_avg)
+
 
             # ---- Reward Model ----- #
             predicted_reward = self.model_reward.forward(next_states, actions)
 
             # ---- Done Model ------#
-            predicted_done = self.model_done.forward(next_states)
-
-
+            # todo Do i Need a done model?
+            #predicted_done = self.model_done.forward(next_states)
 
 
             '''
@@ -196,7 +255,6 @@ class ModelAgent:
             self.model_reward_optimizer.zero_grad()
             reward_loss.backward()
             self.model_reward_optimizer.step()
-            
             '''
 
 
@@ -240,15 +298,13 @@ class ModelAgent:
                     self.model_reward.train()
 
 
-                imaginative_experiences = 0
-
 
 def main():
 
     env   = gym.make("Pendulum-v1")
     agent = ModelAgent(env)
 
-    EPISODES = 10
+    EPISODES = 300
 
     # todo add randome accion here for a considerable steps and add them to the  env memory buffer,
     #  totally random choices, exploration
@@ -259,7 +315,6 @@ def main():
 
         state = env.reset()
         done = False
-
 
         F = 0
         while not done:
