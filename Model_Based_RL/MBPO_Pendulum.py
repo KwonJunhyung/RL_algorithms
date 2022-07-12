@@ -57,23 +57,27 @@ class ModelNet_probabilistic_transition(nn.Module):
         super(ModelNet_probabilistic_transition, self).__init__()
 
         self.mean_layer = nn.Sequential(
-            nn.Linear(input_size, hidden_size[0]),
+            nn.Linear(input_size, hidden_size[0],     bias=True),
             nn.ReLU(),
-            nn.Dropout(),
-            nn.Linear(hidden_size[0], hidden_size[1]),
+            nn.Linear(hidden_size[0], hidden_size[1], bias=True),
             nn.ReLU(),
-            nn.Dropout(),
-            nn.Linear(hidden_size[1], 1)
+            nn.Linear(hidden_size[1], hidden_size[2], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_size[2], hidden_size[3], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_size[3], 1)
         )
 
         self.std_layer = nn.Sequential(
-            nn.Linear(input_size, hidden_size[0]),
+            nn.Linear(input_size, hidden_size[0], bias=True),
             nn.ReLU(),
-            nn.Dropout(),
-            nn.Linear(hidden_size[0], hidden_size[1]),
+            nn.Linear(hidden_size[0], hidden_size[1], bias=True),
             nn.ReLU(),
-            nn.Dropout(),
-            nn.Linear(hidden_size[1], 1),
+            nn.Linear(hidden_size[1], hidden_size[2], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_size[2], hidden_size[3], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_size[3], 1),
             nn.Softplus()
         )
 
@@ -139,17 +143,18 @@ class ModelAgent:
     def __init__(self, env):
 
         self.env = env
-        self.max_memory_size = 10_000
-        self.batch_size = 64
-        self.actor_learning_rate = 1e-4
-        self.transition_learning_rate = 1e-2
+        self.max_memory_size = 50_000
+        self.batch_size      = 32
 
+        self.actor_learning_rate      = 1e-4
+        self.transition_learning_rate = 1e-3
 
-        self.memory = Memory(self.max_memory_size)
+        self.hidden_size_network_model = [200, 200, 100, 100]
 
-        self.hidden_size_network_model = [200, 200]
         self.num_states  = 3
         self.num_actions = 1
+
+        self.memory = Memory(self.max_memory_size)
 
         self.model_transition_1 = ModelNet_transitions(self.num_states + self.num_actions, self.hidden_size_network_model, self.num_states)
         self.model_transition_2 = ModelNet_transitions(self.num_states + self.num_actions, self.hidden_size_network_model, self.num_states)
@@ -160,13 +165,14 @@ class ModelAgent:
         self.pdf_transition_3 = ModelNet_probabilistic_transition(self.num_states+self.num_actions, self.hidden_size_network_model)
 
         self.model_reward = ModelNet_reward(self.num_states + self.num_actions, self.hidden_size_network_model, 1)
-        self.model_done   = ModelNet_N_done(self.num_states)
+        self.model_done   = ModelNet_N_done(self.num_states)  # todo do i need this?
 
         self.model_transition_1_optimizer = optim.Adam(self.model_transition_1.parameters(), lr=self.actor_learning_rate)
         self.model_transition_2_optimizer = optim.Adam(self.model_transition_2.parameters(), lr=self.actor_learning_rate)
         self.model_transition_3_optimizer = optim.Adam(self.model_transition_3.parameters(), lr=self.actor_learning_rate)
 
         self.pdf_transition_1_optimizer = optim.Adam(self.pdf_transition_1.parameters(), lr=self.transition_learning_rate, weight_decay=1e-5)
+        self.pdf_transition_2_optimizer = optim.Adam(self.pdf_transition_2.parameters(), lr=self.transition_learning_rate, weight_decay=1e-5)
 
         self.model_reward_optimizer = optim.Adam(self.model_reward.parameters(), lr=self.actor_learning_rate)
 
@@ -214,19 +220,17 @@ class ModelAgent:
 
             # calculate the loss
             loss_neg_log_likelihood_1 = - distribution_probability_model_1.log_prob(next_states)
-
             loss_neg_log_likelihood_1 = torch.mean(loss_neg_log_likelihood_1)
             #loss_neg_log_likelihood_1 = torch.sum(loss_neg_log_likelihood_1)
 
             print(loss_neg_log_likelihood_1)
+            # todo plot this curve and save the data points
 
             self.pdf_transition_1_optimizer.zero_grad()
             loss_neg_log_likelihood_1.backward()
+            torch.nn.utils.clip_grad_norm_(self.pdf_transition_1.parameters(), 10)
             self.pdf_transition_1_optimizer.step()
 
-
-            #loss_avg = torch.mean(neg_log_likelihood_1)
-            #print(loss_avg)
 
 
             # ---- Reward Model ----- #
@@ -304,7 +308,23 @@ def main():
     env   = gym.make("Pendulum-v1")
     agent = ModelAgent(env)
 
-    EPISODES = 300
+    EPISODES = 100
+    Initial_Exploration_episodes = 30
+
+
+    for explo_step in range(1, Initial_Exploration_episodes+1):
+        state = env.reset()
+        done  = False
+        print("exploration:", explo_step)
+        while not done:
+            action = env.action_space.sample()
+            next_state, reward, done, _ = env.step(action)
+            state = next_state
+            agent.add_real_experience_memory(state, action, reward, next_state, done)
+            if done:
+                break
+
+    print(agent.memory.len_env_buffer())
 
     # todo add randome accion here for a considerable steps and add them to the  env memory buffer,
     #  totally random choices, exploration
@@ -317,6 +337,7 @@ def main():
         done = False
 
         F = 0
+
         while not done:
 
             action = agent.get_action_from_policy()

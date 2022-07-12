@@ -202,7 +202,7 @@ def main():
     num_episodes     = 1000
     render_interval  = num_episodes * 0.99
     episode_horizont = 1000  # after this number env auto-reset
-    batch_size       = 64
+    batch_size       = 32
 
     env   = gym.make('CarRacing-v1')
     agent = TD3_Racing(env, batch_size)
