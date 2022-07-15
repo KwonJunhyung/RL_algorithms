@@ -77,6 +77,7 @@ class Memory:
 class ModelNet_probabilistic_transition(nn.Module):
 
     def __init__(self, input_size, hidden_size):
+
         super(ModelNet_probabilistic_transition, self).__init__()
 
         self.mean_layer = nn.Sequential(
@@ -137,25 +138,23 @@ class ModelNet_transitions(nn.Module):
 
 class ModelNet_reward(nn.Module):
     # This neural network uses action and next state as inputs.
-
-    def __init__(self, input_size):
+    def __init__(self, input_size, hidden_size):
         super(ModelNet_reward, self).__init__()
-        hidden_size = [1024, 512, 256]
 
-        self.model_reward_predict = nn.Sequential
-        (
-            nn.Linear(input_size, hidden_size[0]),
+        self.reward_predicted_model = nn.Sequential(
+            nn.Linear(input_size, hidden_size[0], bias=True),
             nn.ReLU(),
-            nn.Linear(in_features=hidden_size[0], out_features=hidden_size[1]),
+            nn.Dropout(),
+            nn.Linear(hidden_size[0], hidden_size[1]),
             nn.ReLU(),
-            nn.Linear(in_features=hidden_size[1], out_features=hidden_size[2]),
+            nn.Linear(hidden_size[1], hidden_size[2]),
             nn.ReLU(),
-            nn.Linear(in_features=hidden_size[2], out_features=1)
+            nn.Linear(hidden_size[2], 1)
         )
 
     def forward(self, state, action):
         x = torch.cat([state, action], dim=1)  # Concatenates the seq tensors in the given dimension
-        r = self.model_reward_predict(x)
+        r = self.reward_predicted_model(x)
         return r
 
 
@@ -228,10 +227,12 @@ class ModelAgent:
         self.actor_learning_rate  = 1e-4
         self.critic_learning_rate = 1e-3
 
-        self.hidden_size_network_model = [256, 256, 128, 128]
+        self.hidden_size_network_model  = [256, 256, 128, 128]
+        self.hidden_size_network_reward = [1024, 512, 256]
 
         self.hidden_size_critic = [512, 512, 256]
         self.hidden_size_actor  = [256, 256, 256]
+
 
         self.num_states  = 3
         self.num_actions = 1
@@ -306,7 +307,7 @@ class ModelAgent:
         self.pdf_transition_3_optimizer = optim.Adam(self.pdf_transition_3.parameters(),
                                                      lr=self.transition_learning_rate, weight_decay=1e-5)
 
-        self.model_reward = ModelNet_reward(self.num_states + self.num_actions)
+        self.model_reward = ModelNet_reward(self.num_states + self.num_actions, self.hidden_size_network_reward)
 
 
         self.model_reward_optimizer = optim.Adam(self.model_reward.parameters(), lr=self.reward_learning_rate)
@@ -372,6 +373,7 @@ class ModelAgent:
                 loss_reward.backward()
                 self.model_reward_optimizer.step()
                 self.loss_reward.append(loss_reward.item())
+                print(loss_reward)
 
             '''     
             # ---- Transition Model---- #
@@ -653,9 +655,9 @@ def main():
     plt.ylabel('MSE Loss')
     plt.xlabel('steps')
     plt.title('Training Curve Prediction')
-    plt.plot(np.array(agent.loss_model_1))
+    #plt.plot(np.array(agent.loss_model_1))
     plt.plot(np.array(agent.loss_reward))
-    plt.legend(["transition", "Reward"])
+    #plt.legend(["transition", "Reward"])
     plt.show()
 
     '''
