@@ -14,10 +14,13 @@ import matplotlib.pyplot as plt
 
 class Memory:
 
-    def __init__(self, replay_max_size):
-        self.replay_max_size   = replay_max_size
-        self.replay_buffer_env = deque(maxlen=replay_max_size)
-        self.replay_buffer_model = deque(maxlen=replay_max_size)
+    def __init__(self, replay_max_size_env, replay_max_size_model):
+
+        self.replay_max_size_env   = replay_max_size_env
+        self.replay_max_size_model = replay_max_size_model
+
+        self.replay_buffer_env   = deque(maxlen=replay_max_size_env)
+        self.replay_buffer_model = deque(maxlen=replay_max_size_model)
 
     def replay_buffer_environment_add(self, state, action, reward, next_state, done):
         experience_from_env = (state, action, reward, next_state, done)
@@ -28,10 +31,10 @@ class Memory:
         self.replay_buffer_model.append(experience_from_model)
 
     def sample_experience_from_env(self, batch_size):
-        state_batch = []
+        state_batch  = []
         action_batch = []
         reward_batch = []
-        done_batch = []
+        done_batch   = []
         next_state_batch = []
 
         batch_of_experiences = random.sample(self.replay_buffer_env, batch_size)
@@ -90,10 +93,7 @@ class ModelNet_probabilistic_transition(nn.Module):
             nn.Linear(hidden_size[1], hidden_size[2], bias=True),
             nn.ReLU(),
             nn.Dropout(),
-            nn.Linear(hidden_size[2], hidden_size[3], bias=True),
-            nn.ReLU(),
-            nn.Dropout(),
-            nn.Linear(hidden_size[3], 1)
+            nn.Linear(hidden_size[2], 1)
         )
 
         self.std_layer = nn.Sequential(
@@ -106,17 +106,16 @@ class ModelNet_probabilistic_transition(nn.Module):
             nn.Linear(hidden_size[1], hidden_size[2], bias=True),
             nn.ReLU(),
             nn.Dropout(),
-            nn.Linear(hidden_size[2], hidden_size[3], bias=True),
-            nn.ReLU(),
-            nn.Dropout(),
-            nn.Linear(hidden_size[3], 1),
+            nn.Linear(hidden_size[2], 1),
             nn.Softplus()
         )
 
     def forward(self, state, action):
-        x = torch.cat([state, action], dim=1)  # Concatenates the seq tensors in the given dimension
-        u = self.mean_layer(x)
+        
+        x   = torch.cat([state, action], dim=1)  # Concatenates the seq tensors in the given dimension
+        u   = self.mean_layer(x)
         std = self.std_layer(x)
+        
         return torch.distributions.Normal(u, std)
 
 
@@ -136,20 +135,49 @@ class ModelNet_transitions(nn.Module):
         return x
 
 
+class ModelNet_probabilistic_reward(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super(ModelNet_probabilistic_reward, self).__init__()
+        self.mean_layer = nn.Sequential(
+            nn.Linear(input_size, hidden_size[0], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_size[0], hidden_size[1], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_size[1], hidden_size[2], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_size[2], 1)
+        )
+        self.std_layer = nn.Sequential(
+            nn.Linear(input_size, hidden_size[0], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_size[0], hidden_size[1], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_size[1], hidden_size[2], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden_size[2], 1),
+            nn.Softplus()
+        )
+
+    def forward(self, state, action):
+        x = torch.cat([state, action], dim=1)  # Concatenates the seq tensors in the given dimension
+        u = self.mean_layer(x)
+        std = self.std_layer(x)
+        return torch.distributions.Normal(u, std)
+
+
+
 class ModelNet_reward(nn.Module):
     # This neural network uses action and next state as inputs.
     def __init__(self, input_size, hidden_size):
         super(ModelNet_reward, self).__init__()
-
         self.reward_predicted_model = nn.Sequential(
             nn.Linear(input_size, hidden_size[0], bias=True),
             nn.ReLU(),
-            nn.Dropout(),
-            nn.Linear(hidden_size[0], hidden_size[1]),
+            nn.Linear(hidden_size[0], hidden_size[1], bias=True),
             nn.ReLU(),
-            nn.Linear(hidden_size[1], hidden_size[2]),
+            nn.Linear(hidden_size[1], hidden_size[2], bias=True),
             nn.ReLU(),
-            nn.Linear(hidden_size[2], 1)
+            nn.Linear(hidden_size[2], 1),
         )
 
     def forward(self, state, action):
@@ -214,25 +242,24 @@ class ActorTD3(nn.Module):
 
 
 class ModelAgent:
-
     def __init__(self, env):
         # -------- Hyper-parameters --------------- #
         self.env = env
-        self.batch_size = 128
-        self.max_memory_size = 70_000
+        self.batch_size = 64
+        self.max_memory_size_env   = 50_000
+        self.max_memory_size_model = 50_000
 
         self.reward_learning_rate     = 1e-2
-        self.transition_learning_rate = 1e-2
+        self.transition_learning_rate = 1e-3
 
         self.actor_learning_rate  = 1e-4
         self.critic_learning_rate = 1e-3
 
-        self.hidden_size_network_model  = [256, 256, 128, 128]
-        self.hidden_size_network_reward = [1024, 512, 256]
+        self.hidden_size_network_model  = [128, 128, 64, 32]
+        self.hidden_size_network_reward = [64, 32, 32]
 
         self.hidden_size_critic = [512, 512, 256]
         self.hidden_size_actor  = [256, 256, 256]
-
 
         self.num_states  = 3
         self.num_actions = 1
@@ -249,7 +276,7 @@ class ModelAgent:
         self.tolerance_loss = 1e-5
 
         # ------------- Initialization memory --------------------- #
-        self.memory = Memory(self.max_memory_size)
+        self.memory = Memory(self.max_memory_size_env, self.max_memory_size_model)
 
         # ---------- Initialization and build the networks for TD3 ----------- #
         # Main networks
@@ -274,7 +301,6 @@ class ModelAgent:
 
 
         # ---------- Initialization and build the networks for Model Learning ----------- #
-
         # Deterministic
         self.model_transition_1 = ModelNet_transitions(self.num_states + self.num_actions,
                                                        self.hidden_size_network_model, self.num_states)
@@ -282,8 +308,11 @@ class ModelAgent:
                                                        self.hidden_size_network_model, self.num_states)
         self.model_transition_3 = ModelNet_transitions(self.num_states + self.num_actions,
                                                        self.hidden_size_network_model, self.num_states)
-        # ----------------------------------------------------------------------------------------------
 
+        # Reward
+        self.model_reward = ModelNet_reward(self.num_states + self.num_actions, self.hidden_size_network_reward)
+
+        # ----------------------------------------------------------------------------------------------
         # Probabilistic
         self.pdf_transition_1 = ModelNet_probabilistic_transition(self.num_states + self.num_actions,
                                                                   self.hidden_size_network_model)
@@ -291,6 +320,10 @@ class ModelAgent:
                                                                   self.hidden_size_network_model)
         self.pdf_transition_3 = ModelNet_probabilistic_transition(self.num_states + self.num_actions,
                                                                   self.hidden_size_network_model)
+
+        # Reward
+        self.pdf_reward = ModelNet_probabilistic_reward(self.num_states + self.num_actions,
+                                                                  self.hidden_size_network_reward)
 
         # ------------------------------------------------------------------------------------------------
         self.model_transition_1_optimizer = optim.Adam(self.model_transition_1.parameters(),
@@ -307,14 +340,12 @@ class ModelAgent:
         self.pdf_transition_3_optimizer = optim.Adam(self.pdf_transition_3.parameters(),
                                                      lr=self.transition_learning_rate, weight_decay=1e-5)
 
-        self.model_reward = ModelNet_reward(self.num_states + self.num_actions, self.hidden_size_network_reward)
-
-
         self.model_reward_optimizer = optim.Adam(self.model_reward.parameters(), lr=self.reward_learning_rate)
 
         self.actor_optimizer    = optim.Adam(self.actor.parameters(),     lr=self.actor_learning_rate)
         self.critic_optimizer_1 = optim.Adam(self.critic_q1.parameters(), lr=self.critic_learning_rate)
         self.critic_optimizer_2 = optim.Adam(self.critic_q2.parameters(), lr=self.critic_learning_rate)
+
 
     def get_action_from_policy(self, state):
         state_tensor = torch.from_numpy(state).float().unsqueeze(0)
@@ -333,12 +364,13 @@ class ModelAgent:
         self.memory.replay_buffer_model_add(state, action, reward, next_state, done)
 
     def transition_model_learn(self, mode):
-        # "learning" the model....
+
+        # learning" the model....
 
         if self.memory.len_env_buffer() <= self.batch_size:
             return
         else:
-            states, actions, rewards, next_states, dones = self.memory.sample_experience_from_env(1)
+            states, actions, rewards, next_states, dones = self.memory.sample_experience_from_env(self.batch_size)
 
             states  = np.array(states)
             actions = np.array(actions)
@@ -354,11 +386,13 @@ class ModelAgent:
 
             if mode == "Deterministic":
                 # make the prediction
-                delta_prediction = self.model_transition_1.forward(states, actions)
-                predicted_reward = self.model_reward.forward(states, actions)
+                delta_prediction      = self.model_transition_1.forward(states, actions)
                 next_states_predicted = states + delta_prediction
+                predicted_reward      = self.model_reward.forward(states, actions)
 
                 # calculate the loss
+
+                # Transitions Model ----- #
                 loss_fn = torch.nn.MSELoss(reduction='mean')
                 prediction_loss = loss_fn(next_states_predicted, next_states)
 
@@ -367,54 +401,61 @@ class ModelAgent:
                 self.model_transition_1_optimizer.step()
                 self.loss_model_1.append(prediction_loss.item())
 
-                # ---- Reward Model ----- #
+                # Reward Model ----- #
                 loss_reward = loss_fn(predicted_reward, rewards)
                 self.model_reward_optimizer.zero_grad()
                 loss_reward.backward()
                 self.model_reward_optimizer.step()
                 self.loss_reward.append(loss_reward.item())
-                print(loss_reward)
 
-            '''     
-            # ---- Transition Model---- #
-            # number of ensembles = 3
-            distribution_probability_model_1 = self.pdf_transition_1.forward(states, actions)
-            distribution_probability_model_2 = self.pdf_transition_2.forward(states, actions)
-            distribution_probability_model_3 = self.pdf_transition_3.forward(states, actions)
+            elif mode == "Probabilistic":
 
-            # calculate the loss
-            loss_neg_log_likelihood_1 = - distribution_probability_model_1.log_prob(next_states)
-            loss_neg_log_likelihood_1 = torch.mean(loss_neg_log_likelihood_1)
+                # ---- Transition Model---- #
+                distribution_probability_model_1 = self.pdf_transition_1.forward(states, actions)
+                distribution_probability_model_2 = self.pdf_transition_2.forward(states, actions)
+                distribution_probability_model_3 = self.pdf_transition_3.forward(states, actions)
 
-            loss_neg_log_likelihood_2 = - distribution_probability_model_2.log_prob(next_states)
-            loss_neg_log_likelihood_2 = torch.mean(loss_neg_log_likelihood_2)
+                distribution_probability_reward = self.pdf_reward.forward(states, actions)
 
-            loss_neg_log_likelihood_3 = - distribution_probability_model_3.log_prob(next_states)
-            loss_neg_log_likelihood_3 = torch.mean(loss_neg_log_likelihood_3)
+                # calculate the loss
+                loss_neg_log_likelihood_1 = - distribution_probability_model_1.log_prob(next_states)
+                loss_neg_log_likelihood_1 = torch.mean(loss_neg_log_likelihood_1)
 
-            self.pdf_transition_1_optimizer.zero_grad()
-            loss_neg_log_likelihood_1.backward()
-            self.pdf_transition_1_optimizer.step()
+                loss_neg_log_likelihood_2 = - distribution_probability_model_2.log_prob(next_states)
+                loss_neg_log_likelihood_2 = torch.mean(loss_neg_log_likelihood_2)
 
-            self.pdf_transition_2_optimizer.zero_grad()
-            loss_neg_log_likelihood_2.backward()
-            self.pdf_transition_2_optimizer.step()
+                loss_neg_log_likelihood_3 = - distribution_probability_model_3.log_prob(next_states)
+                loss_neg_log_likelihood_3 = torch.mean(loss_neg_log_likelihood_3)
 
-            self.pdf_transition_3_optimizer.zero_grad()
-            loss_neg_log_likelihood_3.backward()
-            self.pdf_transition_3_optimizer.step()
+                loss_neg_loss_likelihood_reward = -distribution_probability_reward.log_prob(rewards)
+                loss_neg_loss_likelihood_reward = torch.mean(loss_neg_loss_likelihood_reward)
 
-            self.loss_model_1.append(loss_neg_log_likelihood_1.item())
-            # todo plot these loss curves and save the data points
+                
+                self.pdf_transition_1.train()
+                self.pdf_transition_1_optimizer.zero_grad()
+                loss_neg_log_likelihood_1.backward()
+                self.pdf_transition_1_optimizer.step()
 
-            # ---- Done Model ------#
-            # todo Do i Need a done model?
-            
-            '''
+                self.pdf_transition_2_optimizer.zero_grad()
+                loss_neg_log_likelihood_2.backward()
+                self.pdf_transition_2_optimizer.step()
+
+                self.pdf_transition_3_optimizer.zero_grad()
+                loss_neg_log_likelihood_3.backward()
+                self.pdf_transition_3_optimizer.step()
+
+                self.model_reward_optimizer.zero_grad()
+                loss_neg_loss_likelihood_reward.backward()
+                self.model_reward_optimizer.step()
+
+                self.loss_model_1.append(loss_neg_log_likelihood_1.item())
+                self.loss_reward.append(loss_neg_loss_likelihood_reward.item())
+
+                print(loss_neg_log_likelihood_1.item())
+
 
     def generate_dream_samples(self, mode):
-
-        M = 20
+        M = 5
         K_steps = 1
         number_samples = 1  # I need to take a single sample always, fixed value
         decision = "random"
@@ -423,7 +464,6 @@ class ModelAgent:
             return
         else:
             for _ in range(1, M+1):
-
                 state, _, _, _, _ = self.memory.sample_experience_from_env(number_samples)
                 state = np.array(state)  # to get an array of (1,3)
                 state_tensor = torch.FloatTensor(state)  # torch.Size([1, 3])
@@ -514,12 +554,12 @@ class ModelAgent:
 
         if self.memory.len_env_buffer() and self.memory.len_model_buffer() <= self.batch_size:
             return
-
         else:
             G = 6
             for it in range(1, G+1):
+
                 self.update_counter += 1  # todo carefully where to put this number
-                #states, actions, rewards, next_states, dones = self.memory.sample_experience_from_env(self.batch_size)
+
                 states, actions, rewards, next_states, dones = self.memory.sample_experience_from_model(self.batch_size)
 
                 states  = np.array(states)
@@ -589,17 +629,19 @@ class ModelAgent:
 
 
 def main():
+
     env = gym.make("Pendulum-v1")
     agent = ModelAgent(env)
 
     EPISODES = 100
-    Initial_Exploration_episodes = 10
-    F = 30
+    Initial_Exploration_episodes = 50
+    F = 50
 
     rewards     = []
     avg_rewards = []
 
-    mode = "Deterministic"
+    #mode = "Deterministic"
+    mode = "Probabilistic"
 
     for explo_step in range(1, Initial_Exploration_episodes + 1):
         state = env.reset()
@@ -615,7 +657,6 @@ def main():
                 break
 
     for episode in range(1, EPISODES + 1):
-
         print(f"-------Episode:{episode} ---------")
         state = env.reset()
         done  = False
@@ -625,26 +666,28 @@ def main():
         while not done:
 
             step += 1
-            action = agent.get_action_from_policy(state)
-            noise  = (np.random.normal(0, scale=0.1, size=1))
-            action = action + noise
-            action = np.clip(action, -1, 1)
 
+            #action = agent.get_action_from_policy(state)
+            action = env.action_space.sample()
+            #noise  = (np.random.normal(0, scale=0.1, size=1))
+            #action = action + noise
+            action = np.clip(action, -1, 1)
             convert_action = (action - (-1)) * (2 - (-2)) / (1 - (-1)) + (-2)  # to put the output between +2 -2 # todo Do I need this?
             next_state, reward, done, _ = env.step(convert_action)
 
             agent.add_real_experience_memory(state, action, reward, next_state, done)
             state = next_state
 
-            if step <= F:
-                agent.transition_model_learn(mode=mode)
+            #if step <= F:
+            agent.transition_model_learn(mode=mode)
+
             #agent.generate_dream_samples(mode=mode)
             #agent.step_training()
 
             episode_reward += reward
-
             if done:
                 break
+
 
         print(f"******* -----Episode {episode} Ended-----********* ")
         print("Episode total reward:", episode_reward)
@@ -652,23 +695,22 @@ def main():
         avg_rewards.append(np.mean(rewards[-100:]))
 
 
-    plt.ylabel('MSE Loss')
+    plt.ylabel('Model Loss')
     plt.xlabel('steps')
-    plt.title('Training Curve Prediction')
-    #plt.plot(np.array(agent.loss_model_1))
-    plt.plot(np.array(agent.loss_reward))
-    #plt.legend(["transition", "Reward"])
+    #plt.title('Training Curve Prediction')
+    plt.plot(np.array(agent.loss_model_1))
+    #plt.plot(np.array(agent.loss_reward))
+    plt.legend(["transition", "Reward"])
     plt.show()
 
-    '''
-    plt.plot(rewards)
-    plt.plot(avg_rewards)
-    plt.plot()
-    plt.title("MBPO-TD3")
-    plt.xlabel('Episode')
-    plt.ylabel('Reward')
-    plt.show()
-    '''
+    #plt.plot(rewards)
+    #plt.plot(avg_rewards)
+    #plt.plot()
+    #plt.title("MBPO-TD3")
+    #plt.xlabel('Episode')
+    #plt.ylabel('Reward')
+    #plt.show()
+
 
 
 if __name__ == '__main__':
